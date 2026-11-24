@@ -32,6 +32,7 @@ import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.notifications.NotificationId
+import app.aaps.core.interfaces.utils.takeWholeChars
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.IntKey
@@ -6508,6 +6509,9 @@ class DetermineBasalaimiSMB2 @Inject constructor(
         work.consoleLog.add("  └ combined: ${aimiFmt3(basalLearner.getMultiplier())}")
 
         // 🎯 Process UnifiedReactivityLearner
+        // An elevated night gives the glucose-driven short-term factor more weight today. Set before
+        // any read of the combined factor in this tick. See NocturnalHeartRate.
+        unifiedReactivityLearner.nightHeartRateAlert = physioAdapter.nightHeartRateAlert()
         unifiedReactivityLearner.processIfNeeded()
 
         // 📊 Expose UnifiedReactivityLearner state in rT for visibility
@@ -6517,6 +6521,9 @@ class DetermineBasalaimiSMB2 @Inject constructor(
             work.consoleLog.add("  │ shortTermFactor: ${aimiFmt3(analysis.shortTermFactor)}")
             work.consoleLog.add("  │ segmentFactor (${analysis.segmentDaypart.name}): ${aimiFmt3(analysis.segmentFactor)}")
             work.consoleLog.add("  │ combinedFactor: ${aimiFmt3(unifiedReactivityLearner.getCombinedFactor(work.hourOfDay))}")
+            if (unifiedReactivityLearner.nightHeartRateAlert) {
+                work.consoleLog.add("  │ nightHR: ELEVATED -> short-term part counts 50% (follows the last 2 h of glucose)")
+            }
             work.consoleLog.add("  │ TIR 70-180: ${analysis.tir70_180.toInt()}%")
             work.consoleLog.add("  │ CV%: ${analysis.cv_percent.toInt()}%")
             work.consoleLog.add("  │ Hypo count (24h): ${analysis.hypo_count}")
@@ -6620,7 +6627,7 @@ class DetermineBasalaimiSMB2 @Inject constructor(
                         work.consoleLog.add("│ $aiIcon AI: ${"$action (${(cached.verdict.confidence * 100).toInt()}%)".padEnd(25)}│")
                         val evidenceList = cached.verdict.evidence
                         val evidenceStr = if (evidenceList.isNotEmpty()) evidenceList[0] else ""
-                        val evidence = evidenceStr.replace("\n", " ").take(30)
+                        val evidence = evidenceStr.replace("\n", " ").takeWholeChars(30)
                         work.consoleLog.add("│ > ${evidence.padEnd(30)}│")
                     }
                 } catch (_: Exception) {
@@ -7370,7 +7377,7 @@ class DetermineBasalaimiSMB2 @Inject constructor(
             clinical_decision = if ((finalResult.units ?: 0.0) > 0) "SMB_Delivery" else if ((finalResult.rate ?: profile.current_basal) != profile.current_basal) "Basal_Modulation" else "No_Action",
             dosage_u = terminalSmbAmountU,
             target_basal_uph = finalResult.rate,
-            narrative_explanation = finalResult.reason.toString().replace("\n", " | ").take(2048)
+            narrative_explanation = finalResult.reason.toString().replace("\n", " | ").takeWholeChars(2048)
         )
 
         decisionCtx.adjustments.iob_surveillance = lastIobSurveillanceExport
@@ -13515,7 +13522,7 @@ class DetermineBasalaimiSMB2 @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                inner.addConsoleError("AIMI Ra observation failed, decision kept: ${e::class.simpleName}: ${e.message?.take(200).orEmpty()}")
+                inner.addConsoleError("AIMI Ra observation failed, decision kept: ${e::class.simpleName}: ${e.message?.takeWholeChars(200).orEmpty()}")
             }
             inner
         } finally {
@@ -14959,7 +14966,7 @@ class DetermineBasalaimiSMB2 @Inject constructor(
         if (bg != null) builder.append(" bg=${bg.roundToInt()}")
         if (delta != null) builder.append(" Δ=${aimiFmt1(delta)}")
         val reasonText = rT.reason.toString().replace("\n", " | ")
-        builder.append(" reason=${reasonText.take(180)}")
+        builder.append(" reason=${reasonText.takeWholeChars(180)}")
         work.consoleLog.add(builder.toString())
 
         val modeLabel = when {
